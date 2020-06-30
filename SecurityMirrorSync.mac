@@ -1,0 +1,222 @@
+SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System information 
+	;							; between mirror failover members
+	;							; Primary failover member exports security
+	;							; Backup failover member imports security
+	;							;
+	;							; examples:
+	;							; do ^SecurityMirrorSync("\\ESM5510ADEPEDRO\MirrorSync")
+	;							; do ^SecurityMirrorSync("/home/ensemble/MirrorSync")
+	;							;
+	;							;
+	;							; Checks the Audit DB for events on new security settings changes
+	do Start(SharedDir)
+	quit
+	//
+Start(SharedDir)
+	s SharedDir = ##class(%File).NormalizeDirectory(SharedDir)
+	
+	d ##class(SYS.Mirror).GetFailoverMemberStatus(.ThisMember, .OtherMember)
+	
+	/********************************
+	Primary failover member execution
+	********************************/
+	if $lg(ThisMember,3) = "Primary" {
+		
+		// Check if there are still export files from previous Primary failover member
+		// In that case, first import all these before starting exporting again
+		// wildcard to search for export files
+		s wc = SharedDir_"SecurityMirrorSync#"_$tr($lg(OtherMember,1),"/","_")_"*"
+
+		// Get ordered list of files by #number#
+		do ListFiles(SharedDir,wc,.fileslist)
+		
+		if $d(fileslist) {
+			// Import all available security export files
+			s st = $$ImportAllFiles(.fileslist)
+		}
+		
+		// Check for new Audit records
+		if $d(^SecurityMirrorSync($lg(ThisMember,1),"TimeAuditLastCheck")) {
+			
+			s timetostartfrom=^SecurityMirrorSync($lg(ThisMember,1),"TimeAuditLastCheck")
+			
+			// Set the current datetime to the global at end of process. Ensure to not save to global in case of error in process
+			s timeChecked = $zdatetime($h,3)
+			
+			// Initialize variables
+			set flags = 0
+			set nSQLPrivileges = 0
+			set sExport = "export"
+			
+			//List AuditDatabase since last list check
+			set rs=##class(%ResultSet).%New("%SYS.Audit:List")
+			do rs.Execute(timetostartfrom,,"%System","%Security","ResourceChange,RoleChange,"_
+				"UserChange,ApplicationChange,SSLConfigChange" )
+
+			// go over the new Audit rows (if there are new)
+			while rs.Next() {
+				set SystemID=rs.Get("SystemID")
+				set AuditIndex=rs.Get("AuditIndex")
+				set UTCTimeStamp=rs.Get("UTCTimeStamp")
+				do ##class(%SYS.Audit).Get(UTCTimeStamp,SystemID,AuditIndex,.Properties)
+				// check if the description starts with "export". In that case do nothing: This entry should be from our last export
+				// this only works with local installation languages where the description starts with "Export". Works with english and spanish
+				// change the sExport var to the appropiate translation of "export" to the desired language.
+				if '($find($zconvert(Properties("Description"),"L"), sExport) = ($l(sExport)+1)) {
+					set num = $case(Properties("Event"), "ResourceChange":2**4, "RoleChange":2**5, 
+					"UserChange":2**6, "ApplicationChange":2**7, "SSLConfigChange":2**8,:0)
+					s flags = flags + num
+				}
+			}
+			// Check the number of SQLPrivileges in the System:
+			set nSQLPrivileges = $$GetSQLPrivileges()
+			
+			if $d(^SecurityMirrorSync($lg(ThisMember,1),"nSQLPrivileges")) {
+				// Check if the number of SQLPrivileges differ from the number from last Check: 
+				if '(nSQLPrivileges = ^SecurityMirrorSync($lg(ThisMember,1),"nSQLPrivileges")) {
+					s flags = flags + (2**12)
+				}
+			}
+			//Export if there are new Security items to export.
+			if flags > 0 {
+				// wildcard to search for export files
+				s wc = "SecurityMirrorSync#"_$tr($lg(ThisMember,1),"/","_")_"*"
+				
+				// Get ordered list of files by #number#
+				do ListFiles(SharedDir,wc,.fileslist)
+				
+				if $d(fileslist) {
+					// Get the file with highest #number#
+					s key=$order(fileslist(""),-1)
+					s key = key+1
+					s file = "SecurityMirrorSync#"_$tr($lg(ThisMember,1),"/","_")_"#"_key_"#.xml"
+				}else{
+					s file = "SecurityMirrorSync#"_$tr($lg(ThisMember,1),"/","_")_"#1#.xml"
+				}
+				
+				// Export the security
+				s st = $$ExportSecurity(SharedDir_"~"_file,flags)
+				if st { do ##class(%File).Rename(SharedDir_"~"_file,SharedDir_file) }
+			}
+		}else{
+			// First time execution actions
+			
+			// Remove export files (if there are any)
+			s wc = SharedDir_"SecurityMirrorSync#*"
+			set st = ##class(%File).ComplexDelete(wc)
+			
+			// Check the number of SQLPrivileges in the System for first time:
+			set nSQLPrivileges = $$GetSQLPrivileges()
+			
+			// Set the current datetime to the global at end of process. Ensure to not save to global in case of error in process
+			s timeChecked = $zdatetime($h,3)
+			
+			//Export for the first time
+			s file = "SecurityMirrorSync#"_$tr($lg(ThisMember,1),"/","_")_"#1#.xml"
+			s st = $$ExportSecurity(SharedDir_"~"_file,(2**4)+(2**5)+(2**6)+(2**7)+(2**8)+(2**12))
+			if st { do ##class(%File).Rename(SharedDir_"~"_file,SharedDir_file) }
+		}
+		
+		// Set the current datetime to the global
+		s ^SecurityMirrorSync($lg(ThisMember,1),"TimeAuditLastCheck") = $g(timeChecked,0)
+		
+		// Set the current number of SQLPrivileges to the global
+		s ^SecurityMirrorSync($lg(ThisMember,1),"nSQLPrivileges") = $g(nSQLPrivileges,0)
+		
+		
+	/********************************
+	Backup failover member execution
+	********************************/
+	}elseif $lg(ThisMember,3) = "Backup" {
+		// wildcard to search for export files
+		s wc = "SecurityMirrorSync#"_$tr($lg(OtherMember,1),"/","_")_"*"
+
+		// Get ordered list of files by #number#
+		do ListFiles(SharedDir,wc,.fileslist)
+		
+		if $d(fileslist) {
+			// Import all available security export files
+			set st = $$ImportAllFiles(.fileslist)
+		}
+	}
+	
+	// remove vars not used anymore
+	k SharedDir,ThisMember,OtherMember,wc,fileslist,timetostartfrom,flags,nSQLPrivileges,sExport,rs
+	k SystemID,AuditIndex,UTCTimeStamp,Properties,num,key,st,file,timeChecked
+	
+	quit
+	
+ExportSecurity(file, flags) PUBLIC
+	; Export in Windows system CachÃ© Terminal:
+	; w $$ExportSecurity^SecurityMirrorSync("\\ESM5510ADEPEDRO\MirrorSync\ESM5510ADEPEDRO_E2017.xml")
+	; Export in POSIX system CachÃ© Terminal: 
+	; (assuming \\ESM5510ADEPEDRO\MirrorSync is mounted in: /home/ensemble/MirrorSync)
+	; w $$ExportSecurity^SecurityMirrorSync("/home/ensemble/MirrorSync/LOCALHOST.CENTOS3_ENSEMBLE.xml")
+	
+	;Only export the following:
+	//s flags = (2**4) + (2**5) + (2**6) + (2**7) + (2**8) + (2**9) + (2**10) + (2**11) + (2**12)
+	;Bit 4 - Resources,	Bit 5 - Roles,	Bit 6 - Users,	
+	;Bit 7 - Applications,	Bit 8 - SSL Configs,	Bit 9 - PhoneProvider
+	;Bit 10 - X509Credential,	Bit 11 - OpenAMIdentityService,		Bit 12 - SQL privileges
+	;s s = ##class(%SYS.System).WriteToConsoleLog("About to dump SecMirrorSync")
+	s st = ##class(Security.System).ExportAll(file,,flags)
+	s s = ##class(%SYS.System).WriteToConsoleLog("Dumped SecMirrorSync")
+	quit st
+
+
+
+ImportSecurity(file) PUBLIC
+	; Import in Windows system CachÃ© Terminal:
+	; w $$ImportSecurity^SecurityMirrorSync("\\ESM5510ADEPEDRO\MirrorSync\LOCALHOST.CENTOS3_ENSEMBLE.xml")
+	; Import in POSIX system CachÃ© Terminal: 
+	; (assuming \\ESM5510ADEPEDRO\MirrorSync is mounted in: /home/ensemble/MirrorSync)
+	; w $$ImportSecurity^SecurityMirrorSync("/home/ensemble/MirrorSync/ESM5510ADEPEDRO_E2017.xml")
+	
+	;Only import the following:
+	s flags = (2**4) + (2**5) + (2**6) + (2**7) + (2**8) + (2**9) + (2**10) + (2**11) + (2**12)
+	;Bit 4 - Resources,	Bit 5 - Roles,	Bit 6 - Users,	
+	;Bit 7 - Applications,	Bit 8 - SSL Configs,	Bit 9 - PhoneProvider
+	;Bit 10 - X509Credential,	Bit 11 - OpenAMIdentityService,		Bit 12 - SQL privileges
+	; s s = ##class(%SYS.System).WriteToConsoleLog("About to import SecMirrorSync")
+	s st = ##class(Security.System).ImportAll(file,,flags)
+	s s = ##class(%SYS.System).WriteToConsoleLog("imported SecMirrorSync")
+	k flags
+	quit st
+	
+ListFiles(dir,wildcard,list)
+	set rsFiles=##class(%ResultSet).%New("%File:FileSet")
+	do rsFiles.Execute(dir,wildcard)
+
+	// go over the list of files
+	while rsFiles.Next() {
+		s name = rsFiles.Get("Name")
+		s i = $p(name,"#",3)
+		s list(i) = name
+	}
+	k i, name, rsFiles
+	quit
+	
+GetSQLPrivileges()
+	// Check the number of SQLPrivileges in the System:
+	set stSQLPriv = ##class(%SQL.Statement).%ExecDirect(.tStatement,"SELECT count(*) as iCount FROM Security.SQLPrivileges")
+	do stSQLPriv.%Next()
+	quit stSQLPriv.%Get("iCount")
+	
+ImportAllFiles(list)
+	// Go through the list
+	s key=$order(list(""))
+    while (key'="") {
+		s file = list(key)
+		
+		// Import security file 
+		s st = $$ImportSecurity(file)
+		s ^SecurityMirrorSync($lg(ThisMember,1),"ImportsCount") = $g(^SecurityMirrorSync($lg(ThisMember,1),"ImportsCount"),0) +1
+		
+		// Delete succesfully imported file
+		s st = ##class(%File).Delete(file)
+		
+		// Get next subscript 
+		s key = $order(list(key))
+	}
+	k wc, key, list, file
+	quit st
