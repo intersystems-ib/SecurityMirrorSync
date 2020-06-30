@@ -10,9 +10,9 @@ SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System informati
 	;							;
 	;							; Checks the Audit DB for events on new security settings changes
 	
-	for i=1:1:$Length(SharedDirs){ 
-		do Start(dir)
-	}
+	;for i=1:1:$Length(SharedDirs){ 
+		do Start(ShareDir)
+	;}
 	quit
 	//
 Start(SharedDir)
