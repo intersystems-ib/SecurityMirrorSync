@@ -1,4 +1,4 @@
-SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System information 
+SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System information
 	;							; between mirror failover members
 	;							; Primary failover member exports security
 	;							; Backup failover member imports security
@@ -9,7 +9,10 @@ SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System informati
 	;							;
 	;							;
 	;							; Checks the Audit DB for events on new security settings changes
-	do Start(SharedDir)
+	
+	for i=1:1:$Length(SharedDirs){ 
+		do Start(dir)
+	}
 	quit
 	//
 Start(SharedDir)
@@ -179,7 +182,7 @@ ImportSecurity(file) PUBLIC
 	;Bit 10 - X509Credential,	Bit 11 - OpenAMIdentityService,		Bit 12 - SQL privileges
 	; s s = ##class(%SYS.System).WriteToConsoleLog("About to import SecMirrorSync")
 	s st = ##class(Security.System).ImportAll(file,,flags)
-	s s = ##class(%SYS.System).WriteToConsoleLog("imported SecMirrorSync")
+	s s = ##class(%SYS.System).WriteToConsoleLog("Imported SecMirrorSync")
 	k flags
 	quit st
 	
