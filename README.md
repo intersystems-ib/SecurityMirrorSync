@@ -1,5 +1,8 @@
 # SecurityMirrorSync
 
+Author: Antonio de Pedro
+        Eduardo Anglada (small modifications, Antonio did all the work!)
+
 InterSystems Cache does not exchange security information between Mirror members, such as Users, Roles, Resources, etc.
 
 SecurityMirrorSync solves this by exchanging security export files from the primary (active) failover member to the backup (inactive) failover member.
