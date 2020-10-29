@@ -12,9 +12,9 @@ In summary, this add-on consists of a Task that checks the Audit database. In ca
 For example: In the case a user has been created, The routine launched by the Task, exports all the users.
 
 # Notes and limitations
-SecurityMirrorSync does not remove Users, Roles, Resources, etc.
+SecurityMirrorSync does not remove services (there is no corresponding API).
 
-It is recommended to disable users instead of removing them from the system (while using this add-on).
+It is recommended to disable services instead of removing them from the system (while using this add-on).
 
 For SecurityMirrorSync to work properly, do not disable the following Audit events:
 
