@@ -1,4 +1,5 @@
-SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System information
+ROUTINE SecurityMirrorSync
+SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System information 
 	;							; between mirror failover members
 	;							; Primary failover member exports security
 	;							; Backup failover member imports security
@@ -9,10 +10,7 @@ SecurityMirrorSync(SharedDir)	; Routine to synchronize Security.System informati
 	;							;
 	;							;
 	;							; Checks the Audit DB for events on new security settings changes
-	
-	;for i=1:1:$Length(SharedDirs){ 
-		do Start(ShareDir)
-	;}
+	do Start(SharedDir)
 	quit
 	//
 Start(SharedDir)
@@ -42,7 +40,6 @@ Start(SharedDir)
 		if $d(^SecurityMirrorSync($lg(ThisMember,1),"TimeAuditLastCheck")) {
 			
 			s timetostartfrom=^SecurityMirrorSync($lg(ThisMember,1),"TimeAuditLastCheck")
-			
 			// Set the current datetime to the global at end of process. Ensure to not save to global in case of error in process
 			s timeChecked = $zdatetime($h,3)
 			
@@ -53,6 +50,7 @@ Start(SharedDir)
 			
 			//List AuditDatabase since last list check
 			set rs=##class(%ResultSet).%New("%SYS.Audit:List")
+			write "Timetostartfrom="_timetostartfrom
 			do rs.Execute(timetostartfrom,,"%System","%Security","ResourceChange,RoleChange,"_
 				"UserChange,ApplicationChange,SSLConfigChange" )
 
@@ -65,11 +63,24 @@ Start(SharedDir)
 				// check if the description starts with "export". In that case do nothing: This entry should be from our last export
 				// this only works with local installation languages where the description starts with "Export". Works with english and spanish
 				// change the sExport var to the appropiate translation of "export" to the desired language.
+				
 				if '($find($zconvert(Properties("Description"),"L"), sExport) = ($l(sExport)+1)) {
 					set num = $case(Properties("Event"), "ResourceChange":2**4, "RoleChange":2**5, 
 					"UserChange":2**6, "ApplicationChange":2**7, "SSLConfigChange":2**8,:0)
 					s flags = flags + num
+					
 				}
+				//Check if the change is a deletion. 
+				if ($FIND(Properties("Description"),"Eliminar") > 0) ! ($FIND(Properties("Description"),"Delete") > 0) {
+					s d=$LISTBUILD(Properties("Description"))
+					if $DATA(ld) {
+						s ld=ld_d
+					}
+					else{
+						s ld=d 
+					}
+				}
+				
 			}
 			// Check the number of SQLPrivileges in the System:
 			set nSQLPrivileges = $$GetSQLPrivileges()
@@ -100,6 +111,30 @@ Start(SharedDir)
 				// Export the security
 				s st = $$ExportSecurity(SharedDir_"~"_file,flags)
 				if st { do ##class(%File).Rename(SharedDir_"~"_file,SharedDir_file) }
+			}
+			if $d(ld){
+				//Store deletes
+				write "save dels!"
+				s wcdel="*.del"
+				k fileslist, key
+				do ListFiles(SharedDir,wcdel,.fileslist)
+				
+				//write !,"del files=",fileslist
+				if $d(fileslist){
+					s key=$order(fileslist(""),-1)
+					s key=key+1
+					write "key="_key
+					s file = "SecurityMirrorSync#"_$tr($lg(ThisMember,1),"/","_")_"#"_key_"#.del"
+				}else{
+					s file = "SecurityMirrorSync#"_$tr($lg(ThisMember,1),"/","_")_"#1#.del"
+				}
+				//Store all the deletions in file
+				Set delFile=##class(%File).%New(SharedDir_"/"_file)
+				d delFile.Open("NRW")
+				for i=1:1:$listlength(ld){
+				 	d delFile.Write($list(ld,i))
+				}
+				k ld
 			}
 		}else{
 			// First time execution actions
@@ -141,6 +176,10 @@ Start(SharedDir)
 			// Import all available security export files
 			set st = $$ImportAllFiles(.fileslist)
 		}
+		k fileslist
+		s wc="*.del"
+		do ListFiles(SharedDir,wc,fileslist)
+		if ($d(fileslist)){ d ApplyDelFiles(fileslist)}
 	}
 	
 	// remove vars not used anymore
@@ -161,12 +200,10 @@ ExportSecurity(file, flags) PUBLIC
 	;Bit 4 - Resources,	Bit 5 - Roles,	Bit 6 - Users,	
 	;Bit 7 - Applications,	Bit 8 - SSL Configs,	Bit 9 - PhoneProvider
 	;Bit 10 - X509Credential,	Bit 11 - OpenAMIdentityService,		Bit 12 - SQL privileges
-	;s s = ##class(%SYS.System).WriteToConsoleLog("About to dump SecMirrorSync")
 	s st = ##class(Security.System).ExportAll(file,,flags)
-	s s = ##class(%SYS.System).WriteToConsoleLog("Dumped SecMirrorSync")
+	s wt = ##class(%SYS.System).WriteToConsoleLog("Dumped SecurityMirrorSync with flags:"_flags)
+	
 	quit st
-
-
 
 ImportSecurity(file) PUBLIC
 	; Import in Windows system CachÃ© Terminal:
@@ -180,9 +217,7 @@ ImportSecurity(file) PUBLIC
 	;Bit 4 - Resources,	Bit 5 - Roles,	Bit 6 - Users,	
 	;Bit 7 - Applications,	Bit 8 - SSL Configs,	Bit 9 - PhoneProvider
 	;Bit 10 - X509Credential,	Bit 11 - OpenAMIdentityService,		Bit 12 - SQL privileges
-	; s s = ##class(%SYS.System).WriteToConsoleLog("About to import SecMirrorSync")
-	s st = ##class(Security.System).ImportAll(file,,flags)
-	s s = ##class(%SYS.System).WriteToConsoleLog("Imported SecMirrorSync")
+	s st = ##class(Security.System).ImportAll(file,,,flags)
 	k flags
 	quit st
 	
@@ -195,6 +230,7 @@ ListFiles(dir,wildcard,list)
 		s name = rsFiles.Get("Name")
 		s i = $p(name,"#",3)
 		s list(i) = name
+		//write !,"File Name="_name
 	}
 	k i, name, rsFiles
 	quit
@@ -223,3 +259,17 @@ ImportAllFiles(list)
 	}
 	k wc, key, list, file
 	quit st
+	
+ApplyDelFiles(list)
+	for i=1:1:$l(list){
+		s delFile=##class(%File).%New(SharedDir_"/"_list(i))
+		s sc=delFile.Open("R")
+
+		while 'file.AtEnd{
+			set line=file.ReadLine()
+			w line
+		}
+		do file.Close()
+	}
+	
+	quit 1
