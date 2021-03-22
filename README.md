@@ -19,9 +19,13 @@ It is recommended to disable services instead of removing them from the system (
 For SecurityMirrorSync to work properly, do not disable the following Audit events:
 
 %System/%Security/ResourceChange
+
 %System/%Security/RoleChange
+
 %System/%Security/UserChange
+
 %System/%Security/ApplicationChange
+
 %System/%Security/SSLConfigChange
 
 Also, do not remove the Scheduled Task SecurityMirrorSync.
@@ -39,6 +43,7 @@ Save SecurityMirrorSync.xml in a OS path <dir>
 Choose a <SharedDir> that is accesible by both Mirror members
 (this <SharedDir> could be different mounted name on each member, but in fact must be the same physical storage place for both members)
 Note: This directory must have the same permissions as the Ensemble-install-directory has.
+        
 **Permissions Example:
 cd /home/
 ls -la
